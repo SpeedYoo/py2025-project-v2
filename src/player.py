@@ -1,9 +1,10 @@
 class Player:
 
-    def __init__(self, money, name=""):
+    def __init__(self, money, name="", is_bot: bool = False):
         self.__stack_ = money
         self.__name_ = name
         self.__hand_ = []
+        self.is_bot = is_bot
 
     def take_card(self, card):
         self.__hand_.append(card)
