@@ -5,7 +5,7 @@ class Card:
         's': '\u2660',  # pik (spade)
         'h': '\u2665',  # kier (heart)
         'd': '\u2666',  # karo (diamond)
-        'c': '\u2663'  # trefl (club)
+        'c': '\u2663'   # trefl (club)
     }
     RANKS_VALUES = {
         '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10,

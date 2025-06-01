@@ -4,7 +4,7 @@ from typing import List, Dict, Tuple, Optional
 from src.card import Card
 from src.player import Player
 from src.deck import Deck
-from src.hand_evaluator import HandEvaluator
+from src.hand_rank import handRank
 
 
 class InvalidActionError(Exception):
@@ -28,7 +28,7 @@ class GameEngine:
         self.big_blind = big_blind
         self.pot = 0
         self.dealer_idx = 0
-        self.hand_evaluator = HandEvaluator()
+        self.hand_evaluator = handRank()
 
     def play_round(self) -> None:
         """Rozgrywa jedną rundę pokera."""

@@ -1,11 +1,13 @@
 import uuid
 import os
 import platform
-from typing import List
+from typing import List, Dict, Optional
 
 from src.deck import Deck
 from src.game_engine import GameEngine
 from src.player import Player
+from src.fileops.session_manager import SessionManager, serialize_player, create_round_summary
+
 
 def get_player_count():
     while True:
@@ -55,19 +57,14 @@ def setup_players(player_count: int) -> List[Player]:
     return players
 
 
-def setup_game():
-    # Ustawienia początkowe gry
-    print("GRA POKER")
-    player_count = get_player_count()
-    players = setup_players(player_count)
-
-    # Konfiguracja blindów
+def setup_blinds() -> tuple:
+    """Konfiguracja wartości blindów"""
     while True:
         try:
-            small_blind = input("Podaj wartość małej ciemnej (domyślnie 25): ")
+            small_blind = input("Podaj wartość small blind (domyślnie 25): ")
             small_blind = int(small_blind) if small_blind.strip() else 25
 
-            big_blind = input(f"Podaj wartość dużej ciemnej (domyślnie {small_blind * 2}): ")
+            big_blind = input(f"Podaj wartość big blind (domyślnie {small_blind * 2}): ")
             big_blind = int(big_blind) if big_blind.strip() else small_blind * 2
 
             if small_blind <= 0 or big_blind <= 0:
@@ -78,20 +75,162 @@ def setup_game():
                 print("Duża ciemna musi być większa od małej ciemnej.")
                 continue
 
-            break
+            return small_blind, big_blind
         except ValueError:
             print("Podaj poprawne wartości.")
+
+
+def setup_new_game():
+    """Ustawienia początkowe nowej gry"""
+    print("GRA POKER - NOWA GRA")
+    player_count = get_player_count()
+    players = setup_players(player_count)
+    small_blind, big_blind = setup_blinds()
 
     deck = Deck()
     engine = GameEngine(players, deck, small_blind, big_blind)
 
-    return engine
+    # Tworzymy ID dla nowej gry
+    game_id = str(uuid.uuid4())
+
+    return engine, game_id
+
+
+def load_existing_game(session_manager: SessionManager):
+    """Wczytanie istniejącej sesji gry"""
+    print("GRA POKER - WCZYTAJ GRĘ")
+
+    # Lista dostępnych sesji
+    sessions = session_manager.list_sessions()
+
+    if not sessions:
+        print("Nie znaleziono zapisanych sesji gry.")
+        return None, None
+
+    print("\nDostępne sesje gry:")
+    for i, session in enumerate(sessions):
+        players_str = ", ".join(session['players'])
+        print(f"{i + 1}. {session['timestamp']} - Gracze: {players_str} - Rund: {session['rounds_played']}")
+
+    while True:
+        try:
+            choice = input("\nWybierz numer sesji do wczytania (lub 0, aby anulować): ")
+            choice = int(choice)
+
+            if choice == 0:
+                return None, None
+
+            if 1 <= choice <= len(sessions):
+                selected_session = sessions[choice - 1]
+                game_id = selected_session['game_id']
+
+                try:
+                    # Wczytanie szczegółów sesji
+                    session_data = session_manager.load_session(game_id)
+
+                    # Odtworzenie graczy
+                    players = []
+                    for p_data in session_data['players']:
+                        player = Player(p_data['stack'], p_data['name'], p_data.get('is_bot', False))
+                        players.append(player)
+
+                    # Utworzenie silnika gry
+                    deck = Deck()
+                    engine = GameEngine(
+                        players,
+                        deck,
+                        session_data.get('small_blind', 25),
+                        session_data.get('big_blind', 50)
+                    )
+
+                    # Ustawienie pozycji dealera
+                    engine.dealer_idx = session_data.get('dealer_idx', 0)
+
+                    print(f"Wczytano sesję gry z {session_data['timestamp']}")
+                    return engine, game_id
+
+                except Exception as e:
+                    print(f"Błąd podczas wczytywania sesji: {e}")
+                    continue
+
+            print("Nieprawidłowy wybór.")
+        except ValueError:
+            print("Podaj poprawny numer.")
+
+
+def save_game_state(engine: GameEngine, game_id: str, round_number: int, session_manager: SessionManager,
+                    rounds_history: list):
+    """Zapisuje stan gry do pliku sesji"""
+
+    # Serializacja danych graczy
+    players_data = [serialize_player(player) for player in engine.players]
+
+    # Tworzenie danych sesji
+    session_data = {
+        'game_id': game_id,
+        'small_blind': engine.small_blind,
+        'big_blind': engine.big_blind,
+        'dealer_idx': engine.dealer_idx,
+        'round_number': round_number,
+        'players': players_data,
+        'rounds_history': rounds_history
+    }
+
+    # Zapisanie sesji
+    try:
+        session_manager.save_session(session_data)
+        print(f"Stan gry został zapisany. ID sesji: {game_id}")
+        return True
+    except Exception as e:
+        print(f"Błąd podczas zapisywania stanu gry: {e}")
+        return False
+
 
 def main():
-    engine = setup_game()
-    players = engine.players
+    # Inicjalizacja managera sesji
+    session_manager = SessionManager()
 
+    # Utworzenie katalogu data, jeśli nie istnieje
+    if not os.path.exists('data'):
+        os.makedirs('data')
+
+    # Menu główne
+    print("=" * 50)
+    print("POKER - MENU GŁÓWNE")
+    print("=" * 50)
+    print("1. Nowa gra")
+    print("2. Wczytaj grę")
+    print("0. Wyjście")
+
+    choice = input("Wybierz opcję: ")
+
+    engine = None
+    game_id = None
+
+    if choice == "1":
+        engine, game_id = setup_new_game()
+    elif choice == "2":
+        engine, game_id = load_existing_game(session_manager)
+        if engine is None:
+            print("Anulowano wczytywanie gry.")
+            return
+    elif choice == "0":
+        print("Dziękujemy za grę!")
+        return
+    else:
+        print("Nieprawidłowy wybór.")
+        return
+
+    players = engine.players
     round_number = 1
+    rounds_history = []
+
+    # Wczytanie numeru rundy, jeśli kontynuujemy grę
+    if choice == "2":
+        # Wczytaj historię rund
+        session_data = session_manager.load_session(game_id)
+        rounds_history = session_data.get('rounds_history', [])
+        round_number = session_data.get('round_number', 1)
 
     while len(players) >= 2:
         print(f"\nRUNDA {round_number}")
@@ -103,7 +242,41 @@ def main():
             print(f"{p.get_name()}{dealer_mark}{bot_mark}: {p.get_stack_amount()} żetonów")
 
         try:
-            engine.play_round() # rozpoczęcie rundy
+            # Lista akcji w tej rundzie
+            round_actions = []
+
+            # Zapisujemy oryginalną metodę prompt_bet, aby przechwytywać akcje
+            original_prompt_bet = engine.prompt_bet
+
+            # Zastępujemy metodę prompt_bet, aby przechwytywać akcje
+            def prompt_bet_with_logging(player, current_bet, contributed):
+                action = original_prompt_bet(player, current_bet, contributed)
+                # Zapisz akcję
+                round_actions.append({
+                    'player': player.get_name(),
+                    'action': action,
+                    'current_bet': current_bet,
+                    'contributed': contributed,
+                    'stack_before': player.get_stack_amount() + (current_bet - contributed if 'call' in action else 0)
+                })
+                return action
+
+            # Podmieniamy metodę
+            engine.prompt_bet = prompt_bet_with_logging
+
+            # Rozpoczęcie rundy
+            engine.play_round()
+
+            # Przywracamy oryginalną metodę
+            engine.prompt_bet = original_prompt_bet
+
+            # Podsumowanie rundy do zapisania w historii
+            round_summary = create_round_summary(engine, round_number, round_actions)
+            rounds_history.append(round_summary)
+
+            # Zapisanie stanu gry po każdej rundzie
+            save_game_state(engine, game_id, round_number + 1, session_manager, rounds_history)
+
         except Exception as e:
             print(f"Błąd podczas rozgrywania rundy: {e}")
             input("\nNaciśnij ENTER, aby kontynuować...")
@@ -142,8 +315,19 @@ def main():
             print("Za mało graczy, koniec gry.")
             break
 
+        # Menu po rundzie
+        print("\nOpcje:")
+        print("1. Kontynuuj grę")
+        print("2. Zapisz i wyjdź")
+        menu_choice = input("Wybierz opcję: ").strip()
+
+        if menu_choice == "2":
+            # Zapisz grę i zakończ
+            save_game_state(engine, game_id, round_number + 1, session_manager, rounds_history)
+            print("Gra została zapisana. Dziękujemy za grę!")
+            return
+
         round_number += 1
-        input("\nNaciśnij ENTER, aby rozpocząć nową rundę...")
 
     print("\nKONIEC GRY")
 

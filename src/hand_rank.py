@@ -4,7 +4,7 @@ from collections import Counter
 from src.card import Card
 
 
-class HandEvaluator:
+class handRank:
     """Klasa odpowiedzialna za ocenę układów pokerowych."""
 
     HAND_RANKINGS = {
