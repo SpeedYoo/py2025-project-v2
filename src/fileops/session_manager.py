@@ -11,7 +11,7 @@ class SessionManager:
     Umożliwia zapis i odczyt stanu gry do/z plików JSON.
     """
 
-    def __init__(self, data_dir: str = 'data'):
+    def __init__(self, data_dir: str = '../data'):
         """
         Inicjalizuje katalog, w którym przechowywane będą pliki sesji.
 
@@ -19,7 +19,7 @@ class SessionManager:
             data_dir: Ścieżka do katalogu, w którym będą zapisywane pliki sesji.
         """
         self.data_dir = data_dir
-        # Utworzenie katalogu data, jeśli nie istnieje
+
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
 
