@@ -12,6 +12,28 @@ from src.game_engine import GameEngine
 from src.player import Player
 from src.fileops.session_manager import SessionManager, serialize_player, create_round_summary
 
+# Import modułu grafik kart
+USE_CARD_GRAPHICS = False
+CardButton = None
+EnhancedCardButton = None
+get_image_manager = None
+
+try:
+    from src.gui.card_graphics import CardButton, CardDisplay, CardGraphics
+
+    USE_CARD_GRAPHICS = True
+
+    try:
+        from src.gui.card_images import EnhancedCardButton, get_image_manager
+
+        # Nie inicjalizuj jeszcze menedżera - zrobimy to po utworzeniu okna
+        print("Moduł obrazków kart dostępny")
+    except ImportError:
+        print("Używam generowanych grafik kart")
+        get_image_manager = None
+except ImportError:
+    print("Moduł grafik kart niedostępny, używam tekstowej reprezentacji")
+
 
 class PokerGUI:
     def __init__(self, root):
@@ -34,6 +56,20 @@ class PokerGUI:
         self.waiting_for_action = False
         self.current_player_name = ""
         self.game_thread = None
+
+        # Inicjalizuj menedżer obrazków (jeśli dostępny)
+        if USE_CARD_GRAPHICS and get_image_manager:
+            try:
+                image_manager = get_image_manager()
+                image_manager.ensure_loaded()  # Załaduj obrazki po utworzeniu okna
+                if image_manager.use_images:
+                    print("Używam obrazków kart z plików")
+                    global CardButton
+                    CardButton = EnhancedCardButton  # Podmień klasę na wersję z obrazkami
+                else:
+                    print("Używam generowanych grafik kart")
+            except Exception as e:
+                print(f"Błąd podczas ładowania obrazków: {e}")
 
         # Tworzenie GUI
         self._create_menu()
@@ -86,12 +122,21 @@ class PokerGUI:
         self.card_buttons = []
         self.selected_cards = set()
 
-        for i in range(5):
-            btn = tk.Button(self.cards_buttons_frame, text="", width=10, height=5,
-                            font=("Courier", 16), state=tk.DISABLED,
-                            command=lambda idx=i: self._toggle_card_selection(idx))
-            btn.pack(side=tk.LEFT, padx=5)
-            self.card_buttons.append(btn)
+        if USE_CARD_GRAPHICS:
+            # Używamy graficznych kart
+            for i in range(5):
+                card_btn = CardButton(self.cards_buttons_frame, None,
+                                      command=lambda idx=i: self._toggle_card_selection(idx))
+                card_btn.pack(side=tk.LEFT, padx=5)
+                self.card_buttons.append(card_btn)
+        else:
+            # Używamy tekstowych przycisków
+            for i in range(5):
+                btn = tk.Button(self.cards_buttons_frame, text="", width=10, height=5,
+                                font=("Courier", 16), state=tk.DISABLED,
+                                command=lambda idx=i: self._toggle_card_selection(idx))
+                btn.pack(side=tk.LEFT, padx=5)
+                self.card_buttons.append(btn)
 
         # Panel akcji
         self.action_frame = ttk.LabelFrame(self.root, text="Akcje", padding=10)
@@ -134,6 +179,25 @@ class PokerGUI:
 
         self.messages_text = scrolledtext.ScrolledText(self.messages_frame, height=10, wrap=tk.WORD, state=tk.DISABLED)
         self.messages_text.pack(fill=tk.BOTH, expand=True)
+
+        # Konfiguracja tagów dla kolorowych komunikatów
+        self.messages_text.tag_config("header", font=("Arial", 12, "bold"), foreground="blue")
+        self.messages_text.tag_config("win", font=("Arial", 11, "bold"), foreground="green")
+        self.messages_text.tag_config("lose", foreground="red")
+        self.messages_text.tag_config("action", foreground="purple")
+        self.messages_text.tag_config("info", foreground="navy")
+        self.messages_text.tag_config("error", font=("Arial", 10, "bold"), foreground="red", background="yellow")
+
+        # Panel kontrolny na dole
+        self.control_frame = ttk.Frame(self.root)
+        self.control_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.continue_btn = ttk.Button(self.control_frame, text="🎮 Kontynuuj grę",
+                                       command=self._continue_game, state=tk.DISABLED,
+                                       style="Large.TButton")
+        self.continue_btn.pack(side=tk.LEFT, padx=5)
+
+        ttk.Style().configure("Large.TButton", font=("Arial", 12, "bold"))
 
     def _new_game_dialog(self):
         """Dialog nowej gry"""
@@ -415,8 +479,7 @@ class PokerGUI:
                 round_summary = create_round_summary(self.engine, self.round_number, [])
                 self.rounds_history.append(round_summary)
 
-                # Automatyczny zapis po każdej rundzie
-                self._save_game()
+                # Usunięto automatyczny zapis - teraz tylko ręczny z menu
 
                 # Sprawdź czy kontynuować
                 if not self._check_continue():
@@ -432,6 +495,68 @@ class PokerGUI:
                 break
 
         self.message_queue.put(('game_over', 'Koniec gry'))
+
+    def _continue_game(self):
+        """Obsługuje kliknięcie przycisku kontynuacji"""
+        if self.waiting_for_action:
+            self.action_queue.put('continue')
+            self.continue_btn.config(state=tk.DISABLED)
+
+    def _show_showdown_dialog(self, showdown_data):
+        """Pokazuje okno z wynikami showdown"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("🏆 Showdown - Wyniki rozdania")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+
+        # Nagłówek
+        header_frame = ttk.Frame(dialog)
+        header_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Label(header_frame, text="⚔️ SHOWDOWN ⚔️",
+                  font=("Arial", 18, "bold")).pack()
+
+        # Tabela z graczami
+        table_frame = ttk.Frame(dialog)
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Nagłówki kolumn
+        ttk.Label(table_frame, text="Gracz", font=("Arial", 12, "bold")).grid(row=0, column=0, padx=10, pady=5)
+        ttk.Label(table_frame, text="Karty", font=("Arial", 12, "bold")).grid(row=0, column=1, padx=10, pady=5)
+        ttk.Label(table_frame, text="Układ", font=("Arial", 12, "bold")).grid(row=0, column=2, padx=10, pady=5)
+
+        # Dane graczy
+        for i, player_info in enumerate(showdown_data['players'], 1):
+            # Nazwa gracza
+            name_label = ttk.Label(table_frame, text=player_info['name'], font=("Arial", 11))
+            if player_info.get('is_winner'):
+                name_label.config(foreground="green", font=("Arial", 11, "bold"))
+            name_label.grid(row=i, column=0, padx=10, pady=5)
+
+            # Karty
+            ttk.Label(table_frame, text=player_info['cards'],
+                      font=("Courier", 12)).grid(row=i, column=1, padx=10, pady=5)
+
+            # Układ
+            rank_label = ttk.Label(table_frame, text=player_info['rank'], font=("Arial", 11))
+            if player_info.get('is_winner'):
+                rank_label.config(foreground="green", font=("Arial", 11, "bold"))
+            rank_label.grid(row=i, column=2, padx=10, pady=5)
+
+        # Informacja o zwycięzcy i puli
+        winner_frame = ttk.Frame(dialog)
+        winner_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        ttk.Label(winner_frame,
+                  text=f"🏆 Zwycięzca: {showdown_data['winner']} wygrywa {showdown_data['pot']} żetonów!",
+                  font=("Arial", 14, "bold"), foreground="green").pack()
+
+        # Przycisk zamknięcia
+        ttk.Button(dialog, text="OK", command=dialog.destroy,
+                   style="Large.TButton").pack(pady=10)
+
+        # Ustaw focus na dialog
+        dialog.focus_set()
 
     def _gui_prompt_bet(self, player: Player, current_bet: int, contributed: int) -> str:
         """Zastępuje prompt_bet dla GUI"""
@@ -529,6 +654,51 @@ class PokerGUI:
         # Dla innych pytań zwróć pusty string
         return ""
 
+    def _gui_showdown_wrapper(self, active_players=None):
+        """Wrapper dla showdown który wysyła dane do GUI"""
+        # Wywołaj oryginalną metodę
+        if active_players is None:
+            active_players = self.engine.players
+
+        if not active_players:
+            raise ValueError("Brak aktywnych graczy do showdown")
+
+        # Przygotuj dane do wyświetlenia
+        showdown_data = {
+            'players': [],
+            'winner': None,
+            'pot': self.engine.pot
+        }
+
+        # Zbierz informacje o graczach
+        for p in active_players:
+            hand = p.get_player_hand()
+            rank_id, tiebreak = self.engine.hand_evaluator.get_hand_strength(list(hand))
+            hand_name = self.engine.hand_evaluator.HAND_RANKINGS[rank_id]
+
+            showdown_data['players'].append({
+                'name': p.get_name(),
+                'cards': p.cards_to_str(),
+                'rank': hand_name,
+                'strength': (rank_id, tiebreak)
+            })
+
+        # Znajdź zwycięzcę
+        winner = max(active_players,
+                     key=lambda p: self.engine.hand_evaluator.get_hand_strength(list(p.get_player_hand())))
+
+        showdown_data['winner'] = winner.get_name()
+
+        # Oznacz zwycięzcę w danych
+        for player_info in showdown_data['players']:
+            if player_info['name'] == winner.get_name():
+                player_info['is_winner'] = True
+
+        # Wyślij dane do GUI
+        self.message_queue.put(('showdown', showdown_data))
+
+        return winner
+
     def _check_continue(self) -> bool:
         """Sprawdza czy kontynuować grę"""
         # Usuń graczy bez żetonów
@@ -544,14 +714,17 @@ class PokerGUI:
         if len(next_players) < 2:
             return False
 
-        # Dla gracza człowieka pytaj o kontynuację
-        human_players = [p for p in next_players if not p.is_bot]
-        if human_players:
-            self.message_queue.put(('ask_continue', None))
-            response = self.action_queue.get()
-            return response == 'continue'
+        # Włącz przycisk kontynuacji
+        self.message_queue.put(('enable_continue', None))
 
-        return True
+        # Czekaj na decyzję użytkownika
+        self.waiting_for_action = True
+        response = self.action_queue.get()
+        self.waiting_for_action = False
+
+        self.message_queue.put(('disable_continue', None))
+
+        return response == 'continue'
 
     def _create_stdout_redirect(self):
         """Tworzy obiekt do przechwytywania print()"""
@@ -580,10 +753,10 @@ class PokerGUI:
                 elif msg_type == 'round':
                     self.round_label.config(text=f"Runda: {data}")
                 elif msg_type == 'error':
-                    self._add_message(f"BŁĄD: {data}")
+                    self._add_message(f"BŁĄD: {data}", "error")
                     messagebox.showerror("Błąd", data)
                 elif msg_type == 'game_over':
-                    self._add_message("=== KONIEC GRY ===")
+                    self._add_message("=== KONIEC GRY ===", "header")
                     self._disable_all_actions()
                 elif msg_type == 'enable_betting':
                     self._enable_betting_actions(data)
@@ -593,8 +766,13 @@ class PokerGUI:
                     self._enable_card_exchange(data)
                 elif msg_type == 'disable_exchange':
                     self._disable_card_exchange()
-                elif msg_type == 'ask_continue':
-                    self._ask_continue()
+                elif msg_type == 'enable_continue':
+                    self.continue_btn.config(state=tk.NORMAL)
+                    self._add_message("\n👉 Kliknij 'Kontynuuj grę' aby przejść do następnej rundy", "info")
+                elif msg_type == 'disable_continue':
+                    self.continue_btn.config(state=tk.DISABLED)
+                elif msg_type == 'showdown':
+                    self._show_showdown_dialog(data)
 
                 # Zawsze aktualizuj wyświetlanie po przetworzeniu komunikatu
                 self._update_display()
@@ -653,26 +831,81 @@ class PokerGUI:
                 if i < len(self.card_buttons):
                     self.card_buttons[i].config(text=str(card), font=("Courier", 16))
 
-    def _add_message(self, message: str):
-        """Dodaje komunikat do okna komunikatów"""
+    def _add_message(self, message: str, tag=None):
+        """Dodaje komunikat do okna komunikatów z opcjonalnym formatowaniem"""
         self.messages_text.config(state=tk.NORMAL)
-        self.messages_text.insert(tk.END, message + "\n")
+
+        # Dodaj emotki i formatowanie
+        if "===" in message:
+            # Nagłówki
+            if "NOWA GRA" in message:
+                message = "🎮 " + message
+                tag = "header"
+            elif "RUNDA LICYTACJI" in message:
+                message = "💰 " + message
+                tag = "header"
+            elif "WYMIANA KART" in message:
+                message = "🃏 " + message
+                tag = "header"
+            elif "SHOWDOWN" in message:
+                message = "⚔️ " + message
+                tag = "header"
+            elif "KONIEC GRY" in message:
+                message = "🏁 " + message
+                tag = "header"
+            else:
+                tag = "header"
+        elif "zwycięzca" in message.lower() or "wygrywa" in message.lower():
+            message = "🏆 " + message
+            tag = "win"
+        elif "fold" in message.lower() or "pasuje" in message.lower():
+            message = "❌ " + message
+            tag = "lose"
+        elif "call" in message.lower() or "check" in message.lower() or "raise" in message.lower():
+            message = "🎯 " + message
+            tag = "action"
+        elif "bot" in message.lower():
+            message = "🤖 " + message
+            tag = "info"
+        elif "błąd" in message.lower():
+            message = "⚠️ " + message
+            tag = "error"
+
+        if tag:
+            self.messages_text.insert(tk.END, message + "\n", tag)
+        else:
+            self.messages_text.insert(tk.END, message + "\n")
+
         self.messages_text.see(tk.END)
         self.messages_text.config(state=tk.DISABLED)
 
     def _toggle_card_selection(self, idx: int):
         """Przełącza zaznaczenie karty"""
-        if self.card_buttons[idx]['state'] == tk.DISABLED:
-            return
+        if USE_CARD_GRAPHICS:
+            card_btn = self.card_buttons[idx]
+            if not hasattr(card_btn, 'enabled') or not card_btn.enabled:
+                return
 
-        if idx in self.selected_cards:
-            self.selected_cards.remove(idx)
-            self.card_buttons[idx].config(relief=tk.RAISED, bg='SystemButtonFace')
-            self._add_message(f"Odznaczyłeś kartę {idx + 1}")
+            if idx in self.selected_cards:
+                self.selected_cards.remove(idx)
+                card_btn.set_selected(False)
+                self._add_message(f"Odznaczyłeś kartę {idx + 1}")
+            else:
+                self.selected_cards.add(idx)
+                card_btn.set_selected(True)
+                self._add_message(f"Zaznaczyłeś kartę {idx + 1}")
         else:
-            self.selected_cards.add(idx)
-            self.card_buttons[idx].config(relief=tk.SUNKEN, bg='lightblue')
-            self._add_message(f"Zaznaczyłeś kartę {idx + 1}")
+            if self.card_buttons[idx]['state'] == tk.DISABLED:
+                return
+
+            if idx in self.selected_cards:
+                self.selected_cards.remove(idx)
+                self.card_buttons[idx].config(relief=tk.RAISED, bg='SystemButtonFace')
+                self._add_message(f"Odznaczyłeś kartę {idx + 1}")
+            else:
+                self.selected_cards.add(idx)
+                self.card_buttons[idx].config(relief=tk.SUNKEN, bg='lightblue')
+                self._add_message(f"Zaznaczyłeś kartę {idx + 1}")
 
     def _enable_betting_actions(self, data):
         """Włącza przyciski akcji licytacji"""
@@ -715,26 +948,37 @@ class PokerGUI:
         # Pokaż karty na przyciskach
         for i, card in enumerate(hand):
             if i < len(self.card_buttons):
-                self.card_buttons[i].config(
-                    text=str(card),
-                    state=tk.NORMAL,
-                    font=("Courier", 16),
-                    relief=tk.RAISED,
-                    bg='SystemButtonFace'
-                )
+                if USE_CARD_GRAPHICS:
+                    self.card_buttons[i].set_card(card)
+                    self.card_buttons[i].set_enabled(True)
+                    self.card_buttons[i].enabled = True
+                    self.card_buttons[i].set_selected(False)
+                else:
+                    self.card_buttons[i].config(
+                        text=str(card),
+                        state=tk.NORMAL,
+                        font=("Courier", 16),
+                        relief=tk.RAISED,
+                        bg='SystemButtonFace'
+                    )
 
         self.exchange_btn.config(state=tk.NORMAL)
         self.phase_label.config(text="Faza: Wymiana kart")
 
         # Dodaj informację dla gracza
-        self._add_message("\n=== WYMIANA KART ===")
-        self._add_message("Kliknij na karty które chcesz wymienić, następnie kliknij 'Wymień zaznaczone karty'")
-        self._add_message("Możesz też kliknąć przycisk bez zaznaczania kart, aby nie wymieniać żadnych")
+        self._add_message("\n=== WYMIANA KART ===", "header")
+        self._add_message("Kliknij na karty które chcesz wymienić, następnie kliknij 'Wymień zaznaczone karty'", "info")
+        self._add_message("Możesz też kliknąć przycisk bez zaznaczania kart, aby nie wymieniać żadnych", "info")
 
     def _disable_card_exchange(self):
         """Wyłącza wymianę kart"""
-        for btn in self.card_buttons:
-            btn.config(state=tk.DISABLED, relief=tk.RAISED, bg='SystemButtonFace')
+        for i, btn in enumerate(self.card_buttons):
+            if USE_CARD_GRAPHICS:
+                btn.set_enabled(False)
+                btn.enabled = False
+                btn.set_selected(False)
+            else:
+                btn.config(state=tk.DISABLED, relief=tk.RAISED, bg='SystemButtonFace')
         self.exchange_btn.config(state=tk.DISABLED)
         self.selected_cards.clear()
 
@@ -777,14 +1021,9 @@ class PokerGUI:
         """Wyłącza wszystkie akcje"""
         self._disable_betting_actions()
         self._disable_card_exchange()
+        self.continue_btn.config(state=tk.DISABLED)
 
-    def _ask_continue(self):
-        """Pyta gracza czy kontynuować grę"""
-        response = messagebox.askyesno("Kontynuacja", "Czy chcesz kontynuować grę?")
-        if response:
-            self.action_queue.put('continue')
-        else:
-            self.action_queue.put('quit')
+        messagebox.showerror("Błąd", f"Maksymalny raise: {max_raise}", parent=self)
 
 
 class PokerGUIApp:
