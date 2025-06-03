@@ -31,7 +31,6 @@ def setup_players(player_count: int) -> List[Player]:
                 print("Nazwa nie może być pusta.")
                 continue
 
-            # Sprawdzenie czy nazwa jest unikalna
             if any(p.get_name() == name for p in players):
                 print("Ta nazwa jest już zajęta.")
                 continue
@@ -90,7 +89,6 @@ def setup_new_game():
     deck = Deck()
     engine = GameEngine(players, deck, small_blind, big_blind)
 
-    # Tworzymy ID dla nowej gry
     game_id = str(uuid.uuid4())
 
     return engine, game_id
@@ -100,7 +98,6 @@ def load_existing_game(session_manager: SessionManager):
     """Wczytanie istniejącej sesji gry"""
     print("GRA POKER - WCZYTAJ GRĘ")
 
-    # Lista dostępnych sesji
     sessions = session_manager.list_sessions()
 
     if not sessions:
@@ -125,16 +122,13 @@ def load_existing_game(session_manager: SessionManager):
                 game_id = selected_session['game_id']
 
                 try:
-                    # Wczytanie szczegółów sesji
                     session_data = session_manager.load_session(game_id)
 
-                    # Odtworzenie graczy
                     players = []
                     for p_data in session_data['players']:
                         player = Player(p_data['stack'], p_data['name'], p_data.get('is_bot', False))
                         players.append(player)
 
-                    # Utworzenie silnika gry
                     deck = Deck()
                     engine = GameEngine(
                         players,
@@ -143,7 +137,6 @@ def load_existing_game(session_manager: SessionManager):
                         session_data.get('big_blind', 50)
                     )
 
-                    # Ustawienie pozycji dealera
                     engine.dealer_idx = session_data.get('dealer_idx', 0)
 
                     print(f"Wczytano sesję gry z {session_data['timestamp']}")
@@ -162,10 +155,8 @@ def save_game_state(engine: GameEngine, game_id: str, round_number: int, session
                     rounds_history: list):
     """Zapisuje stan gry do pliku sesji"""
 
-    # Serializacja danych graczy
     players_data = [serialize_player(player) for player in engine.players]
 
-    # Tworzenie danych sesji
     session_data = {
         'game_id': game_id,
         'small_blind': engine.small_blind,
@@ -176,7 +167,6 @@ def save_game_state(engine: GameEngine, game_id: str, round_number: int, session
         'rounds_history': rounds_history
     }
 
-    # Zapisanie sesji
     try:
         session_manager.save_session(session_data)
         print(f"Stan gry został zapisany. ID sesji: {game_id}")
@@ -187,12 +177,7 @@ def save_game_state(engine: GameEngine, game_id: str, round_number: int, session
 
 
 def main():
-    # Inicjalizacja managera sesji
-    session_manager = SessionManager()
-
-    # Utworzenie katalogu data, jeśli nie istnieje
-    if not os.path.exists('data'):
-        os.makedirs('data')
+    session_manager = SessionManager("../data")
 
     # Menu główne
     print("=" * 50)
@@ -225,9 +210,7 @@ def main():
     round_number = 1
     rounds_history = []
 
-    # Wczytanie numeru rundy, jeśli kontynuujemy grę
     if choice == "2":
-        # Wczytaj historię rund
         session_data = session_manager.load_session(game_id)
         rounds_history = session_data.get('rounds_history', [])
         round_number = session_data.get('round_number', 1)
@@ -242,13 +225,10 @@ def main():
             print(f"{p.get_name()}{dealer_mark}{bot_mark}: {p.get_stack_amount()} żetonów")
 
         try:
-            # Lista akcji w tej rundzie
             round_actions = []
 
-            # Zapisujemy oryginalną metodę prompt_bet, aby przechwytywać akcje
             original_prompt_bet = engine.prompt_bet
 
-            # Zastępujemy metodę prompt_bet, aby przechwytywać akcje
             def prompt_bet_with_logging(player, current_bet, contributed):
                 action = original_prompt_bet(player, current_bet, contributed)
                 # Zapisz akcję
@@ -261,28 +241,24 @@ def main():
                 })
                 return action
 
-            # Podmieniamy metodę
             engine.prompt_bet = prompt_bet_with_logging
 
-            # Rozpoczęcie rundy
             engine.play_round()
 
-            # Przywracamy oryginalną metodę
             engine.prompt_bet = original_prompt_bet
 
-            # Podsumowanie rundy do zapisania w historii
             round_summary = create_round_summary(engine, round_number, round_actions)
             rounds_history.append(round_summary)
 
-            # Zapisanie stanu gry po każdej rundzie
-            save_game_state(engine, game_id, round_number + 1, session_manager, rounds_history)
+            is_save = input("Czy chcesz zapisać stan gry ?  (t/n): ")
+            if is_save == "t" : save_game_state(engine, game_id, round_number + 1, session_manager, rounds_history)
+
 
         except Exception as e:
             print(f"Błąd podczas rozgrywania rundy: {e}")
             input("\nNaciśnij ENTER, aby kontynuować...")
             continue
 
-        # Sprawdzenie czy gracze chcą kontynuować
         next_round = []
         print("\nDecyzje o pozostaniu w grze:")
 
@@ -292,7 +268,6 @@ def main():
                 continue
 
             if p.is_bot:
-                # Bot zostaje w grze dopóki ma żetony
                 print(f"{p.get_name()} (BOT) zostaje w grze.")
                 next_round.append(p)
             else:

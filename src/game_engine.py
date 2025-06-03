@@ -143,7 +143,6 @@ class GameEngine:
     def prompt_bet(self, player: Player, current_bet: int, contributed: int) -> str:
         to_call = current_bet - contributed
 
-        # Dla botów generujemy losową akcję
         if player.is_bot:
             if to_call > 0:
                 if random.random() < 0.7:  # 70% szansa na call
@@ -159,7 +158,6 @@ class GameEngine:
             print(f"{player.get_name()} (BOT) wykonuje: {action}")
             return action
 
-        # Dla graczy człowieków wyświetlamy menu
         valid_actions = []
         action_menu = []
 
@@ -177,7 +175,6 @@ class GameEngine:
             valid_actions.append('raise')
             action_menu.append("[r]aise <amount>")
 
-        # Monitorowanie błędnych inputów
         max_attempts = 3
         attempts = 0
 
@@ -189,7 +186,6 @@ class GameEngine:
                     f"Dostępne akcje: {' / '.join(action_menu)}: "
                 ).strip().lower()
 
-                # Obsługa skrótów
                 if action == 'c' and 'call' in valid_actions:
                     return 'call'
                 elif action == 'c' and 'check' in valid_actions:
@@ -228,7 +224,6 @@ class GameEngine:
                 print(f"Błąd: {e}")
                 attempts += 1
 
-        # Po wyczerpaniu prób, domyślnie fold
         print("Zbyt wiele błędnych prób, wykonuję fold")
         return 'fold'
 
@@ -275,7 +270,6 @@ class GameEngine:
 
                     seen.add(player)
 
-                    # Warunki zakończenia rundy licytacji
                     if len(active) <= 1:
                         return active
 
@@ -287,7 +281,6 @@ class GameEngine:
                         return active
                 except (InvalidActionError, ValueError) as e:
                     print(f"Błąd: {e}")
-                    # W przypadku błędu, domyślnie fold
                     if player in active:
                         active.remove(player)
                         print(f"{player.get_name()} pasuje (domyślnie)")
@@ -301,7 +294,6 @@ class GameEngine:
         if not active_players:
             raise ValueError("Brak aktywnych graczy do showdown")
 
-        # Przygotowanie informacji o układach graczy
         showdown_info = []
         for p in active_players:
             hand = p.get_player_hand()
@@ -310,14 +302,12 @@ class GameEngine:
             hand_name = self.hand_evaluator.HAND_RANKINGS[rank_id]
             showdown_info.append((p, p.get_name(), hand_name, strength, p.cards_to_str()))
 
-        # Wyświetlenie tabeli z układami
         print("\n=== SHOWDOWN ===")
         print(f"{'Gracz':<15} | {'Układ':<17} | {'Siła':<20} | Karty")
         print('-' * 70)
         for _, name, rank, strength, cards in showdown_info:
             print(f"{name:<15} | {rank:<17} | {str(strength):<20} | {cards}")
 
-        # Wyłonienie zwycięzcy na podstawie siły układu
         winner = max(active_players,
                      key=lambda p: self.hand_evaluator.get_hand_strength(list(p.get_player_hand())))
         win_rank_id = self.hand_evaluator.get_hand_strength(list(winner.get_player_hand()))[0]
@@ -326,21 +316,17 @@ class GameEngine:
         return winner
 
     def exchange_cards(self, hand: Tuple[Card], indices: List[int]) -> List[Card]:
-        # Konwersja krotki na listę do modyfikacji
         new_hand = list(hand)
 
-        # Walidacja indeksów
         for i in indices:
             if i < 0 or i >= len(hand):
                 raise IndexError(f"Nieprawidłowy indeks karty: {i}")
 
-        # Wymiana kart
         for i in indices:
             old = new_hand[i]
             try:
                 new = self.deck.cards.pop()
                 new_hand[i] = new
-                # Odłożenie starej karty do spodu talii
                 self.deck.cards.insert(0, old)
             except IndexError:
                 raise IndexError("Brak kart w talii do wymiany")

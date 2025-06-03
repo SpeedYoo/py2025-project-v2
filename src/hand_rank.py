@@ -39,7 +39,6 @@ class handRank:
         cnt = Counter(ranks).most_common()
         counts = sorted([c for _, c in cnt], reverse=True)
 
-        # Sprawdzenie wszystkich możliwych układów od najsilniejszego
         # Poker
         if is_straight and is_flush:
             return 9, [high]
